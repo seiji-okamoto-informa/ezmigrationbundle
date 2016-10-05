@@ -24,12 +24,21 @@ class TagManager extends RepositoryExecutor
     {
         $this->checkTagsBundleInstall();
 
-        $alwaysAvail = array_key_exists('always_available', $this->dsl) ? $this->dsl['always_available'] : true;
-        $parentTagId = array_key_exists('parent_tag_id', $this->dsl) ? $this->dsl['parent_tag_id'] : 0;
+        $alwaysAvail = isset($this->dsl['always_available']) ? $this->dsl['always_available'] : true;
+        $parentTagId = isset($this->dsl['parent_tag_id']) ? $this->dsl['parent_tag_id'] : 0;
+
+        if (isset($this->dsl['lang'])) {
+            $lang = $this->dsl['lang'];
+        } elseif (isset($this->dsl['main_language_code'])) {
+            // deprecated tag
+            $lang = $this->dsl['main_language_code'];
+        } else {
+            throw new \Exception("The 'lang' key is required to create a tag.");
+        }
 
         $tagCreateArray = array(
             'parentTagId' => $parentTagId,
-            'mainLanguageCode' => $this->dsl['main_language_code'],
+            'mainLanguageCode' => $lang,
             'alwaysAvailable' => $alwaysAvail,
         );
         $tagCreateStruct = new TagCreateStruct($tagCreateArray);
@@ -41,6 +50,8 @@ class TagManager extends RepositoryExecutor
 
         $tag = $this->tagService->createTag($tagCreateStruct);
         $this->setReferences($tag);
+
+        return $tag;
     }
 
     protected function update()

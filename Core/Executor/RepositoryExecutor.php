@@ -106,7 +106,7 @@ abstract class RepositoryExecutor extends AbstractExecutor implements LanguageAw
 
             $previousUserId = $this->loginUser(self::ADMIN_USER_ID);
             try {
-                $this->$action();
+                $output = $this->$action();
             } catch (\Exception $e) {
                 $this->loginUser($previousUserId);
                 throw $e;
@@ -115,6 +115,7 @@ abstract class RepositoryExecutor extends AbstractExecutor implements LanguageAw
             // reset the environment as much as possible as we had found it before the migration
             $this->loginUser($previousUserId);
 
+            return $output;
         } else {
             throw new \Exception("Invalid step definition: value '$action' is not a method of " . get_class($this));
         }
@@ -130,6 +131,18 @@ abstract class RepositoryExecutor extends AbstractExecutor implements LanguageAw
      * @return boolean
      */
     abstract protected function setReferences($object);
+
+    /**
+     * Courtesy function for subclasses
+     * @param $key
+     * @return mixed
+     */
+    protected function resolveReferences($key) {
+        if ($this->referenceResolver->isReference($key)) {
+            return $this->referenceResolver->getReferenceValue($key);
+        }
+        return $key;
+    }
 
     /**
      * Helper method to log in a user that can make changes to the system.

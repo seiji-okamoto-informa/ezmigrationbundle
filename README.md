@@ -125,6 +125,7 @@ In a Yaml migration, you can define the following types of actions:
 - creation, update and deletion of UserGroups
 - creation, update and deletion of Roles
 - creation, update and deletion of ContentTypes
+- creation and deletion of Languages
 - creation of Tags (from the Netgen Tags Bundle)
 
 The docs describing all supported parameters are in the [DSL Language description](Resources/doc/DSL/README.md)
@@ -199,7 +200,37 @@ applying a given migration. We recommend always taking a database snapshot befor
 case you need to roll back your changes. Another approach consists in writing a separate migration to undo the changes. 
 
 
-## Known Issues
+## Customizing the migration logic via Event Listeners
+
+An easy way to hook up custom logic to the execution of migration steps - without having to implement your own
+customized action executors - is to use Event Listeners.
+
+Two events are fired *for each step* during execution of migrations:
+
+    * ez_migration.before_execution => listeners receive a BeforeStepExecutionEvent event instance
+    * ez_migration.step_executed => listeners receive a StepExecutedEvent event instance
+
+In order to act on those events, you will need to declare tagged services, such as for ex:
+
+    my.step_executed_listener:
+        class: my\helper\StepExecutedListener
+        tags:
+            - { name: kernel.event_listener, event: ez_migration.step_executed, method: onStepExecuted }
+
+and the corresponding php class:
+
+    use Kaliop\eZMigrationBundle\API\Event\StepExecutedEvent;
+    
+    class StepExecutedListener
+    {
+        public function onStepExecuted(StepExecutedEvent $event)
+        {
+            // do something...
+        }
+    }
+
+
+## Known Issues and limitations
 
 * if you get fatal errors when running a migration stating that a node or object has not been found, it is most likely
     related to how the dual-kernel works in eZPublish, and the fact that the legacy and Symfony kernels use a separate
@@ -208,6 +239,22 @@ case you need to roll back your changes. Another approach consists in writing a 
     can not see the database changes applied by the Symfony kernel, and, depending on the specific Slot in use, might
     fail with a fatal error.
     The simplest workaround is to disable usage of transactions by passing the `-u` flag to the `migrate` command.
+
+* if you get fatal errors without any error message when running a migration which involves a lot of content changes,
+    such as f.e. altering a contentType with many contents, it light be that you are running out of memory for your
+    php process.
+    Known workarounds involve:
+    - increase the maximum amount of memory allowed for the php script by running it with option '-d memory_limit=-1'
+    - execute the migration command using a Symfony environment which has reduced logging and kernel debug disabled:
+        the default configuration for the `dev` environment is known to leak memory
+
+* the bundle does not at the moment support creation of user accounts using a custom contentType
+
+* the bundle at the moment does not support creating entities with a creator other than user id 14 ('admin')
+
+* if you are using eZPublish versions prior to 2015.9, you will not be able to create/update Role definitions that
+    contain policies with limitations for custom modules/functions. The known workaround is to take over the
+    RoleService and alter its constructor to inject into it the desired limitations
 
 
 ## Extending the bundle
@@ -218,10 +265,11 @@ The bundle has been designed to be easily extended in many ways, such as:
 * adding support for custom/complex field-types
 * adding support for completely new actions in the Yml definitions
 * adding support for a new file format for storing migration definitions
+* adding support for a new resolver for the custom references in the migration definitions
 * taking over the way that the migrations definitions are loaded from the filesystem or stored in the database
 * etc... 
 
-Following Symfony best practices, for the first 3 options in the list above all you need to do is to create a service
+Following Symfony best practices, for the first 4 options in the list above all you need to do is to create a service
 and give it an appropriate tag (the class implementing service should of course implement an appropriate interface). 
 
 To find out the names of the tags that you need to implement, as well as for all the other services which you can
@@ -251,3 +299,4 @@ To run the Behat tests:
 [![Build Status](https://travis-ci.org/kaliop-uk/ezmigrationbundle.svg?branch=master)](https://travis-ci.org/kaliop-uk/ezmigrationbundle)
 [![Scrutinizer Code Quality](https://scrutinizer-ci.com/g/kaliop-uk/ezmigrationbundle/badges/quality-score.png?b=master)](https://scrutinizer-ci.com/g/kaliop-uk/ezmigrationbundle/?branch=master)
 [![Code Coverage](https://scrutinizer-ci.com/g/kaliop-uk/ezmigrationbundle/badges/coverage.png?b=master)](https://scrutinizer-ci.com/g/kaliop-uk/ezmigrationbundle/?branch=master)
+[![SensioLabsInsight](https://insight.sensiolabs.com/projects/7f16a049-a738-44ae-b947-f39401aec2d5/mini.png)](https://insight.sensiolabs.com/projects/7f16a049-a738-44ae-b947-f39401aec2d5)

@@ -40,9 +40,17 @@ parameters:
     ez_migration_bundle.executor.tag_manager.class: Kaliop\eZMigrationBundle\Core\Executor\TagManager
     ez_migration_bundle.executor.user_group_manager.class: Kaliop\eZMigrationBundle\Core\Executor\UserGroupManager
     ez_migration_bundle.executor.user_manager.class: Kaliop\eZMigrationBundle\Core\Executor\UserManager
+    ez_migration_bundle.executor.language_manager.class: Kaliop\eZMigrationBundle\Core\Executor\LanguageManager
 
     ez_migration_bundle.content_matcher.class: Kaliop\eZMigrationBundle\Core\Matcher\ContentMatcher
     ez_migration_bundle.location_matcher.class: Kaliop\eZMigrationBundle\Core\Matcher\LocationMatcher
+    ez_migration_bundle.user_matcher.class: Kaliop\eZMigrationBundle\Core\Matcher\UserMatcher
+    ez_migration_bundle.user_group_matcher.class: Kaliop\eZMigrationBundle\Core\Matcher\UserGroupMatcher
+    ez_migration_bundle.role_matcher.class: Kaliop\eZMigrationBundle\Core\Matcher\RoleMatcher
+    ez_migration_bundle.content_type_matcher.class: Kaliop\eZMigrationBundle\Core\Matcher\ContentTypeMatcher
+    ez_migration_bundle.section_matcher.class: Kaliop\eZMigrationBundle\Core\Matcher\SectionMatcher
+    ez_migration_bundle.object_state_matcher.class: Kaliop\eZMigrationBundle\Core\Matcher\ObjectStateMatcher
+    ez_migration_bundle.content_type_group_matcher.class: Kaliop\eZMigrationBundle\Core\Matcher\ContentTypeGroupMatcher
 
     ez_migration_bundle.complex_field_manager.class: Kaliop\eZMigrationBundle\Core\ComplexField\ComplexFieldManager
     ez_migration_bundle.complex_field.ezauthor.class: Kaliop\eZMigrationBundle\Core\ComplexField\EzAuthor
@@ -60,7 +68,7 @@ parameters:
     ez_migration_bundle.reference_resolver.location.class: Kaliop\eZMigrationBundle\Core\ReferenceResolver\LocationResolver
     ez_migration_bundle.reference_resolver.tag.class: Kaliop\eZMigrationBundle\Core\ReferenceResolver\TagResolver
 
-    ez_migration_bundle.helper.role_handler.class: Kaliop\eZMigrationBundle\Core\Helper\RoleHandler
+    ez_migration_bundle.helper.limitation_converter.class: Kaliop\eZMigrationBundle\Core\Helper\LimitationConverter
     ez_migration_bundle.helper.console_io.class: Kaliop\eZMigrationBundle\Core\Helper\ConsoleIO
 
 services:
@@ -71,6 +79,7 @@ services:
             - '@ez_migration_bundle.loader'
             - '@ez_migration_bundle.storage_handler'
             - '@ezpublish.api.repository'
+            - '@event_dispatcher'
 
     ### loaders
 
@@ -143,7 +152,11 @@ services:
         class: '%ez_migration_bundle.executor.content_manager.class%'
         arguments:
             - '@ez_migration_bundle.content_matcher'
+            - '@ez_migration_bundle.section_matcher'
+            - '@ez_migration_bundle.user_matcher'
+            - '@ez_migration_bundle.object_state_matcher'
             - '@ez_migration_bundle.complex_field_manager'
+            - '@ez_migration_bundle.executor.location_manager'
         tags:
             - { name: ez_migration_bundle.executor }
 
@@ -152,6 +165,7 @@ services:
         class: '%ez_migration_bundle.executor.location_manager.class%'
         arguments:
             - '@ez_migration_bundle.content_matcher'
+            - '@ez_migration_bundle.location_matcher'
         tags:
             - { name: ez_migration_bundle.executor }
 
@@ -159,19 +173,25 @@ services:
         parent: ez_migration_bundle.executor.repository
         class: '%ez_migration_bundle.executor.content_type_manager.class%'
         arguments:
-            - '@ez_migration_bundle.reference_resolver.location'
+            - '@ez_migration_bundle.content_type_matcher'
+            - '@ez_migration_bundle.content_type_group_matcher'
         tags:
             - { name: ez_migration_bundle.executor }
 
     ez_migration_bundle.executor.user_manager:
         parent: ez_migration_bundle.executor.repository
         class: '%ez_migration_bundle.executor.user_manager.class%'
+        arguments:
+            - '@ez_migration_bundle.user_matcher'
         tags:
             - { name: ez_migration_bundle.executor }
 
     ez_migration_bundle.executor.user_group_manager:
         parent: ez_migration_bundle.executor.repository
         class: '%ez_migration_bundle.executor.user_group_manager.class%'
+        arguments:
+            - '@ez_migration_bundle.user_group_matcher'
+            - '@ez_migration_bundle.role_matcher'
         tags:
             - { name: ez_migration_bundle.executor }
 
@@ -179,7 +199,14 @@ services:
         class: '%ez_migration_bundle.executor.role_manager.class%'
         parent: ez_migration_bundle.executor.repository
         arguments:
-            - '@ez_migration_bundle.helper.role_handler'
+            - '@ez_migration_bundle.role_matcher'
+            - '@ez_migration_bundle.helper.limitation_converter'
+        tags:
+            - { name: ez_migration_bundle.executor }
+
+    ez_migration_bundle.executor.language_manager:
+        class: '%ez_migration_bundle.executor.language_manager.class%'
+        parent: ez_migration_bundle.executor.repository
         tags:
             - { name: ez_migration_bundle.executor }
 
@@ -203,6 +230,41 @@ services:
         arguments:
             - '@ezpublish.api.repository'
 
+    ez_migration_bundle.user_matcher:
+        class: '%ez_migration_bundle.user_matcher.class%'
+        arguments:
+            - '@ezpublish.api.repository'
+
+    ez_migration_bundle.user_group_matcher:
+        class: '%ez_migration_bundle.user_group_matcher.class%'
+        arguments:
+            - '@ezpublish.api.repository'
+
+    ez_migration_bundle.role_matcher:
+        class: '%ez_migration_bundle.role_matcher.class%'
+        arguments:
+            - '@ezpublish.api.repository'
+
+    ez_migration_bundle.content_type_matcher:
+        class: '%ez_migration_bundle.content_type_matcher.class%'
+        arguments:
+            - '@ezpublish.api.repository'
+
+    ez_migration_bundle.section_matcher:
+        class: '%ez_migration_bundle.section_matcher.class%'
+        arguments:
+            - '@ezpublish.api.repository'
+
+    ez_migration_bundle.object_state_matcher:
+        class: '%ez_migration_bundle.object_state_matcher.class%'
+        arguments:
+            - '@ezpublish.api.repository'
+
+    ez_migration_bundle.content_type_group_matcher:
+        class: '%ez_migration_bundle.content_type_group_matcher.class%'
+        arguments:
+            - '@ezpublish.api.repository'
+
     ### field handlers
 
     ez_migration_bundle.complex_field_manager:
@@ -215,7 +277,7 @@ services:
     ez_migration_bundle.complex_field:
         abstract: true
         calls:
-            - ['setReferenceResolver', ['@ez_migration_bundle.reference_resolver']]
+            - ['setReferenceResolver', ['@ez_migration_bundle.reference_resolver.customreference']]
 
     ez_migration_bundle.complex_field.ezauthor:
         parent: ez_migration_bundle.complex_field
@@ -246,29 +308,40 @@ services:
     ez_migration_bundle.complex_field.ezrelation:
         parent: ez_migration_bundle.complex_field
         class: '%ez_migration_bundle.complex_field.ezrelation.class%'
+        arguments:
+            - '@ez_migration_bundle.content_matcher'
         tags:
             - { name: ez_migration_bundle.complex_field, fieldtype: ezobjectrelation }
 
     ez_migration_bundle.complex_field.ezrelationlist:
         parent: ez_migration_bundle.complex_field
         class: '%ez_migration_bundle.complex_field.ezrelationlist.class%'
+        arguments:
+            - '@ez_migration_bundle.content_matcher'
         tags:
             - { name: ez_migration_bundle.complex_field, fieldtype: ezobjectrelationlist }
 
     ez_migration_bundle.complex_field.ezrichtext:
         parent: ez_migration_bundle.complex_field
         class: '%ez_migration_bundle.complex_field.ezrichtext.class%'
+        arguments:
+            - '@ez_migration_bundle.content_matcher'
+            - '@ez_migration_bundle.location_matcher'
         tags:
             - { name: ez_migration_bundle.complex_field, fieldtype: ezrichtext }
 
     ez_migration_bundle.complex_field.ezxmltext:
         parent: ez_migration_bundle.complex_field
         class: '%ez_migration_bundle.complex_field.ezxmltext.class%'
+        arguments:
+            - '@ez_migration_bundle.content_matcher'
+            - '@ez_migration_bundle.location_matcher'
         tags:
             - { name: ez_migration_bundle.complex_field, fieldtype: ezxmltext }
 
     ### reference resolvers
 
+    # A service that will resolve *any* possible reference. To be used with care
     ez_migration_bundle.reference_resolver:
         alias: ez_migration_bundle.reference_resolver.chain
 
@@ -278,10 +351,11 @@ services:
             -
                 - '@ez_migration_bundle.reference_resolver.customreference'
                 - '@ez_migration_bundle.reference_resolver.location'
-                # not enabled by default for v2, as it might break v1 migrations that don't expect it to be present
-                #- '@ez_migration_bundle.reference_resolver.content'
+               # not enabled by default for v2, as it might break v1 migrations that don't expect it to be present
+               #- '@ez_migration_bundle.reference_resolver.content'
                 - '@ez_migration_bundle.reference_resolver.tag'
 
+    # @deprecated
     ez_migration_bundle.reference_resolver.content:
         class: '%ez_migration_bundle.reference_resolver.content.class%'
         arguments:
@@ -298,18 +372,29 @@ services:
             - '@ezpublish.translation_helper'
             - '@?ezpublish.api.service.tags'
 
+    # A service which resolves *only* custom references. As such, it is used in most places
     ez_migration_bundle.reference_resolver.customreference:
+        alias: ez_migration_bundle.reference_resolver.customreference.flexible
+
+    ez_migration_bundle.reference_resolver.customreference.base:
         class: '%ez_migration_bundle.reference_resolver.customreference.class%'
         arguments: []
 
+    # NB: This service will see added to the chain any service tagged as 'ez_migration_bundle.reference_resolver.customreference'
+    ez_migration_bundle.reference_resolver.customreference.flexible:
+        class: '%ez_migration_bundle.reference_resolver.chain.class%'
+        arguments:
+            - [ '@ez_migration_bundle.reference_resolver.customreference.base' ]
+
     ### misc
 
-    ez_migration_bundle.helper.role_handler:
-        class: '%ez_migration_bundle.helper.role_handler.class%'
+    ez_migration_bundle.helper.limitation_converter:
+        class: '%ez_migration_bundle.helper.limitation_converter.class%'
         arguments:
-            - '@ezpublish.api.repository'
-            - '@ezpublish.translation_helper'
             - '%ezpublish.siteaccess.list%'
+            - '@ez_migration_bundle.location_matcher'
+            - '@ez_migration_bundle.section_matcher'
+            - '@ez_migration_bundle.content_type_matcher'
 
     ez_migration_bundle.helper.console_io:
         class: '%ez_migration_bundle.helper.console_io.class%'

@@ -6,7 +6,9 @@ use eZ\Publish\API\Repository\Values\User\Role;
 use eZ\Publish\API\Repository\RoleService;
 use eZ\Publish\API\Repository\UserService;
 use eZ\Publish\API\Repository\Exceptions\InvalidArgumentException;
-use Kaliop\eZMigrationBundle\Core\Helper\RoleHandler;
+use Kaliop\eZMigrationBundle\API\Collection\RoleCollection;
+use Kaliop\eZMigrationBundle\Core\Helper\LimitationConverter;
+use Kaliop\eZMigrationBundle\Core\Matcher\RoleMatcher;
 
 /**
  * Handles the role migration definitions.
@@ -15,11 +17,13 @@ class RoleManager extends RepositoryExecutor
 {
     protected $supportedStepTypes = array('role');
 
-    protected $roleHandler;
+    protected $limitationConverter;
+    protected $roleMatcher;
 
-    public function __construct(RoleHandler $roleHandler)
+    public function __construct(RoleMatcher $roleMatcher, LimitationConverter $limitationConverter)
     {
-        $this->roleHandler = $roleHandler;
+        $this->roleMatcher = $roleMatcher;
+        $this->limitationConverter = $limitationConverter;
     }
 
     /**
@@ -34,19 +38,23 @@ class RoleManager extends RepositoryExecutor
 
         // Publish new role
         $role = $roleService->createRole($roleCreateStruct);
+        if (is_callable(array($roleService, 'publishRoleDraft'))) {
+            $roleService->publishRoleDraft($role);
+        }
 
-        if (array_key_exists('policies', $this->dsl)) {
-            $ymlPolicies = $this->dsl['policies'];
-            foreach($ymlPolicies as $key => $ymlPolicy) {
+        if (isset($this->dsl['policies'])) {
+            foreach($this->dsl['policies'] as $key => $ymlPolicy) {
                 $this->addPolicy($role, $roleService, $ymlPolicy);
             }
         }
 
-        if (array_key_exists('assign', $this->dsl)) {
+        if (isset($this->dsl['assign'])) {
             $this->assignRole($role, $roleService, $userService, $this->dsl['assign']);
         }
 
         $this->setReferences($role);
+
+        return $role;
     }
 
     /**
@@ -54,21 +62,30 @@ class RoleManager extends RepositoryExecutor
      */
     protected function update()
     {
+        $roleCollection = $this->matchRoles('update');
+
+        if (count($roleCollection) > 1 && isset($this->dsl['references'])) {
+            throw new \Exception("Can not execute Role update because multiple roles match, and a references section is specified in the dsl. References can be set when only 1 role matches");
+        }
+
+        if (count($roleCollection) > 1 && isset($this->dsl['new_name'])) {
+            throw new \Exception("Can not execute Role update because multiple roles match, and a new_name is specified in the dsl.");
+        }
+
         $roleService = $this->repository->getRoleService();
         $userService = $this->repository->getUserService();
 
-        if (array_key_exists('name', $this->dsl)) {
-            /** @var \eZ\Publish\API\Repository\Values\User\Role $role */
-            $role = $roleService->loadRoleByIdentifier($this->dsl['name']);
+        /** @var \eZ\Publish\API\Repository\Values\User\Role $role */
+        foreach ($roleCollection as $key => $role) {
 
             // Updating role name
-            if (array_key_exists('new_name', $this->dsl)) {
+            if (isset($this->dsl['new_name'])) {
                 $update = $roleService->newRoleUpdateStruct();
                 $update->identifier = $this->dsl['new_name'];
-                $roleService->updateRole($role, $update);
+                $role = $roleService->updateRole($role, $update);
             }
 
-            if (array_key_exists('policies', $this->dsl)) {
+            if (isset($this->dsl['policies'])) {
                 $ymlPolicies = $this->dsl['policies'];
 
                 // Removing all policies so we can add them back.
@@ -78,18 +95,21 @@ class RoleManager extends RepositoryExecutor
                     $roleService->deletePolicy($policy);
                 }
 
-                foreach($ymlPolicies as $key => $ymlPolicy) {
+                foreach($ymlPolicies as $ymlPolicy) {
                     $this->addPolicy($role, $roleService, $ymlPolicy);
                 }
             }
 
-            if (array_key_exists('assign', $this->dsl)) {
+            if (isset($this->dsl['assign'])) {
                 $this->assignRole($role, $roleService, $userService, $this->dsl['assign']);
             }
 
-            $this->setReferences($role);
+            $roleCollection[$key] = $role;
         }
 
+        $this->setReferences($roleCollection);
+
+        return $roleCollection;
     }
 
     /**
@@ -97,13 +117,47 @@ class RoleManager extends RepositoryExecutor
      */
     protected function delete()
     {
-        // Get the eZ 5 API Repository and the required services
+        $roleCollection = $this->matchRoles('delete');
+
         $roleService = $this->repository->getRoleService();
 
-        if (array_key_exists('name', $this->dsl)) {
-            $role = $roleService->loadRoleByIdentifier($this->dsl['name']);
+        foreach ($roleCollection as $role) {
             $roleService->deleteRole($role);
         }
+
+        return $roleCollection;
+    }
+
+    /**
+     * @param string $action
+     * @return RoleCollection
+     * @throws \Exception
+     */
+    protected function matchRoles($action)
+    {
+        if (!isset($this->dsl['name']) && !isset($this->dsl['match'])) {
+            throw new \Exception("The name of a role or a match condition is required to $action it.");
+        }
+
+        // Backwards compat
+        if (!isset($this->dsl['match'])) {
+            $this->dsl['match'] = array('identifier' => $this->dsl['name']);
+        }
+
+        $match = $this->dsl['match'];
+
+        // convert the references passed in the match
+        foreach ($match as $condition => $values) {
+            if (is_array($values)) {
+                foreach ($values as $position => $value) {
+                    $match[$condition][$position] = $this->resolveReferences($value);
+                }
+            } else {
+                $match[$condition] = $this->resolveReferences($values);
+            }
+        }
+
+        return $this->roleMatcher->match($match);
     }
 
     /**
@@ -111,7 +165,7 @@ class RoleManager extends RepositoryExecutor
      *
      * The Role Manager currently support setting references to role_ids.
      *
-     * @param \eZ\Publish\API\Repository\Values\User\Role $role
+     * @param \eZ\Publish\API\Repository\Values\User\Role|RoleCollection $role
      * @throws \InvalidArgumentException When trying to assign a reference to an unsupported attribute
      * @return boolean
      */
@@ -119,6 +173,13 @@ class RoleManager extends RepositoryExecutor
     {
         if (!array_key_exists('references', $this->dsl)) {
             return false;
+        }
+
+        if ($role instanceof RoleCollection) {
+            if (count($role) > 1) {
+                throw new \InvalidArgumentException('Role Manager does not support setting references for creating/updating of multiple roles');
+            }
+            $role = reset($role);
         }
 
         foreach ($this->dsl['references'] as $reference) {
@@ -162,12 +223,9 @@ class RoleManager extends RepositoryExecutor
         $limitationValue = is_array($limitation['values']) ? $limitation['values'] : array($limitation['values']);
 
         foreach($limitationValue as $id => $value) {
-            if ($this->referenceResolver->isReference($value)) {
-                $value = $this->referenceResolver->getReferenceValue($value);
-                $limitationValue[$id] = $value;
-            }
+            $limitationValue[$id] = $this->resolveReferences($value);
         }
-        $limitationValue = $this->roleHandler->convertLimitationToValue($limitation['identifier'], $limitationValue);
+        $limitationValue = $this->limitationConverter->resolveLimitationValue($limitation['identifier'], $limitationValue);
         return $limitationType->buildValue($limitationValue);
     }
 
@@ -195,12 +253,14 @@ class RoleManager extends RepositoryExecutor
             switch ($assign['type']) {
                 case 'user':
                     foreach ($assign['ids'] as $userId) {
+                        $userId = $this->resolveReferences($userId);
+
                         $user = $userService->loadUser($userId);
 
-                        if (!array_key_exists('limitation', $assign)) {
+                        if (!isset($assign['limitations'])) {
                             $roleService->assignRoleToUser($role, $user);
                         } else {
-                            foreach ($assign['limitation'] as $limitation) {
+                            foreach ($assign['limitations'] as $limitation) {
                                 $limitationObject = $this->createLimitation($roleService, $limitation);
                                 $roleService->assignRoleToUser($role, $user, $limitationObject);
                             }
@@ -209,17 +269,21 @@ class RoleManager extends RepositoryExecutor
                     break;
                 case 'group':
                     foreach ($assign['ids'] as $groupId) {
+                        $groupId = $this->resolveReferences($groupId);
+
                         $group = $userService->loadUserGroup($groupId);
 
-                        if (!array_key_exists('limitation', $assign)) {
+                        if (!isset($assign['limitations'])) {
                             try {
                                 $roleService->assignRoleToUserGroup($role, $group);
+                                // q: why are we swallowing exceptions here ?
                             } catch (InvalidArgumentException $e) {}
                         } else {
-                            foreach ($assign['limitation'] as $limitation) {
+                            foreach ($assign['limitations'] as $limitation) {
                                 $limitationObject = $this->createLimitation($roleService, $limitation);
                                 try {
                                     $roleService->assignRoleToUserGroup($role, $group, $limitationObject);
+                                // q: why are we swallowing exceptions here ?
                                 } catch (InvalidArgumentException $e) {}
                             }
                         }
